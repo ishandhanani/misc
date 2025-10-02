@@ -32,9 +32,9 @@ final class IncrementUITests: XCTestCase {
         // Wait for app to load
         sleep(2)
 
-        // Find and tap the START SESSION button
-        let startButton = app.buttons["START SESSION"]
-        XCTAssertTrue(startButton.exists, "START SESSION button should exist")
+        // Find and tap the START WORKOUT button
+        let startButton = app.buttons["START WORKOUT"]
+        XCTAssertTrue(startButton.exists, "START WORKOUT button should exist")
 
         startButton.tap()
 
@@ -58,8 +58,26 @@ final class IncrementUITests: XCTestCase {
         sleep(1)
 
         // Start session
-        app.buttons["START SESSION"].tap()
+        app.buttons["START WORKOUT"].tap()
         sleep(1)
+
+        // Tap feeling rating and continue
+        if app.buttons["3"].exists {
+            app.buttons["3"].tap()
+            sleep(1)
+        }
+
+        // Continue from pre-workout feeling screen
+        if app.buttons["START WORKOUT"].exists {
+            app.buttons["START WORKOUT"].tap()
+            sleep(1)
+        }
+
+        // Skip stretching if present
+        if app.buttons["START WORKOUT →"].exists {
+            app.buttons["START WORKOUT →"].tap()
+            sleep(1)
+        }
 
         // Should be on warmup - advance through warmups
         if app.buttons["NEXT WARMUP WEIGHT »"].exists {

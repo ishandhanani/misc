@@ -371,4 +371,232 @@ struct SessionManagerTests {
             PersistenceManager.shared.clearAll()
         }
     }
+
+    // MARK: - Session Resume Tests
+
+    /// Test resuming a session during rest phase
+    /// Critical: Users should be able to resume mid-workout with all data intact
+    @Test("SessionManager: Resume session during rest phase")
+    func testResumeSessionDuringRest() async {
+        // Arrange
+        await PersistenceManager.shared.clearAll()
+        let manager = await SessionManager()
+        let planId = await MainActor.run { manager.workoutPlans.first!.id }
+
+        // Start and progress to rest phase
+        await MainActor.run {
+            manager.startSession(workoutPlanId: planId)
+            manager.logPreWorkoutFeeling(PreWorkoutFeeling(rating: 4))
+            manager.skipStretching()
+            manager.advanceWarmup()
+            manager.advanceWarmup()
+            manager.acknowledgeLoad()
+            manager.logSet(reps: 5, rating: .hard)
+            // logSet() automatically starts rest timer and puts us in .rest state
+            // Don't call advanceToNextSet() - that would exit rest state
+        }
+
+        // Verify we're in rest phase
+        let isInRest = await MainActor.run {
+            if case .rest = manager.sessionState {
+                return true
+            }
+            return false
+        }
+        #expect(isInRest)
+
+        // Capture the state before "closing app"
+        let exerciseId = await MainActor.run { manager.currentExerciseLog?.exerciseId }
+        let setCount = await MainActor.run { manager.currentExerciseLog?.setLogs.count }
+        let prescription = await MainActor.run { manager.nextPrescription }
+
+        // Act - Simulate app restart by creating new manager instance
+        let newManager = await SessionManager()
+
+        // Assert - Should detect resumable session
+        let hasResumableSession = await MainActor.run { newManager.hasResumableSession }
+        #expect(hasResumableSession)
+
+        // Act - Resume session
+        await MainActor.run {
+            newManager.resumeSession()
+        }
+
+        // Assert - Should restore rest state with all data
+        await MainActor.run {
+            // Should be in rest state
+            if case .rest = newManager.sessionState {
+                // Success
+            } else {
+                Issue.record("Expected rest state after resume")
+            }
+
+            // Should restore exercise log
+            #expect(newManager.currentExerciseLog != nil)
+            #expect(newManager.currentExerciseLog?.exerciseId == exerciseId)
+            #expect(newManager.currentExerciseLog?.setLogs.count == setCount)
+
+            // Should restore prescription
+            #expect(newManager.nextPrescription != nil)
+            #expect(newManager.nextPrescription?.reps == prescription?.reps)
+            #expect(newManager.nextPrescription?.weight == prescription?.weight)
+        }
+
+        // Cleanup
+        await PersistenceManager.shared.clearAll()
+    }
+
+    /// Test resuming a session during stretching phase
+    @Test("SessionManager: Resume session during stretching")
+    func testResumeSessionDuringStretching() async {
+        // Arrange
+        await PersistenceManager.shared.clearAll()
+        let manager = await SessionManager()
+        let planId = await MainActor.run { manager.workoutPlans.first!.id }
+
+        // Start and stop at stretching
+        await MainActor.run {
+            manager.startSession(workoutPlanId: planId)
+            manager.logPreWorkoutFeeling(PreWorkoutFeeling(rating: 4))
+        }
+
+        // Verify we're in stretching phase
+        let isInStretching = await MainActor.run {
+            if case .stretching = manager.sessionState {
+                return true
+            }
+            return false
+        }
+        #expect(isInStretching)
+
+        // Act - Simulate app restart
+        let newManager = await SessionManager()
+
+        // Assert - Should detect resumable session
+        let hasResumableSession = await MainActor.run { newManager.hasResumableSession }
+        #expect(hasResumableSession)
+
+        // Act - Resume session
+        await MainActor.run {
+            newManager.resumeSession()
+        }
+
+        // Assert - Should restore stretching state
+        await MainActor.run {
+            if case .stretching = newManager.sessionState {
+                // Success
+            } else {
+                Issue.record("Expected stretching state after resume")
+            }
+        }
+
+        // Cleanup
+        await PersistenceManager.shared.clearAll()
+    }
+
+    /// Test that stale sessions are not resumable
+    @Test("SessionManager: Stale session not resumable")
+    func testStaleSessionNotResumable() async {
+        // Arrange
+        await PersistenceManager.shared.clearAll()
+        let manager = await SessionManager()
+        let planId = await MainActor.run { manager.workoutPlans.first!.id }
+
+        // Start session
+        await MainActor.run {
+            manager.startSession(workoutPlanId: planId)
+            manager.logPreWorkoutFeeling(PreWorkoutFeeling(rating: 4))
+        }
+
+        // Manually modify the session to be stale (older than 24 hours)
+        await MainActor.run {
+            if var session = manager.currentSession {
+                session.lastUpdated = Date(timeIntervalSinceNow: -86400 - 1) // 24 hours + 1 second ago
+                PersistenceManager.shared.saveCurrentSession(session)
+            }
+        }
+
+        // Act - Create new manager instance
+        let newManager = await SessionManager()
+
+        // Assert - Should not detect resumable session
+        let hasResumableSession = await MainActor.run { newManager.hasResumableSession }
+        #expect(!hasResumableSession)
+
+        // Cleanup
+        await PersistenceManager.shared.clearAll()
+    }
+
+    /// Test discarding a resumable session
+    @Test("SessionManager: Discard resumable session")
+    func testDiscardResumableSession() async {
+        // Arrange
+        await PersistenceManager.shared.clearAll()
+        let manager = await SessionManager()
+        let planId = await MainActor.run { manager.workoutPlans.first!.id }
+
+        // Start session
+        await MainActor.run {
+            manager.startSession(workoutPlanId: planId)
+            manager.logPreWorkoutFeeling(PreWorkoutFeeling(rating: 4))
+        }
+
+        // Act - Simulate app restart
+        let newManager = await SessionManager()
+
+        // Verify resumable session exists
+        let hasResumableBefore = await MainActor.run { newManager.hasResumableSession }
+        #expect(hasResumableBefore)
+
+        // Act - Discard session
+        await MainActor.run {
+            newManager.discardSession()
+        }
+
+        // Assert - Should clear resumable session
+        await MainActor.run {
+            #expect(!newManager.hasResumableSession)
+            #expect(newManager.currentSession == nil)
+            #expect(newManager.sessionState == .intro)
+        }
+
+        // Cleanup
+        await PersistenceManager.shared.clearAll()
+    }
+
+    /// Test resuming preserves set index
+    @Test("SessionManager: Resume preserves set index")
+    func testResumePreservesSetIndex() async {
+        // Arrange
+        await PersistenceManager.shared.clearAll()
+        let manager = await SessionManager()
+        let planId = await MainActor.run { manager.workoutPlans.first!.id }
+
+        // Start and log one set, should be in rest before set 2
+        await MainActor.run {
+            manager.startSession(workoutPlanId: planId)
+            manager.logPreWorkoutFeeling(PreWorkoutFeeling(rating: 4))
+            manager.skipStretching()
+            manager.advanceWarmup()
+            manager.advanceWarmup()
+            manager.acknowledgeLoad()
+            manager.logSet(reps: 5, rating: .hard)
+            // logSet() puts us in rest state before set 2
+        }
+
+        let setIndexBefore = await MainActor.run { manager.currentSetIndex }
+
+        // Act - Simulate app restart
+        let newManager = await SessionManager()
+        await MainActor.run {
+            newManager.resumeSession()
+        }
+
+        // Assert - Should restore set index
+        let setIndexAfter = await MainActor.run { newManager.currentSetIndex }
+        #expect(setIndexAfter == setIndexBefore)
+
+        // Cleanup
+        await PersistenceManager.shared.clearAll()
+    }
 }

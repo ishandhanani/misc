@@ -169,6 +169,14 @@ public struct Session: Codable, Identifiable, Sendable {
     public var stats: SessionStats
     public var synced: Bool
 
+    // Resume state fields
+    public var isActive: Bool
+    public var currentExerciseIndex: Int?
+    public var currentSetIndex: Int?
+    public var sessionStateRaw: String?  // Serialized SessionState
+    public var currentExerciseLog: ExerciseSessionLog?  // In-progress exercise log
+    public var lastUpdated: Date
+
     public init(
         id: UUID = UUID(),
         date: Date = Date(),
@@ -176,7 +184,13 @@ public struct Session: Codable, Identifiable, Sendable {
         preWorkoutFeeling: PreWorkoutFeeling? = nil,
         exerciseLogs: [ExerciseSessionLog] = [],
         stats: SessionStats = SessionStats(totalVolume: 0),
-        synced: Bool = false
+        synced: Bool = false,
+        isActive: Bool = true,
+        currentExerciseIndex: Int? = nil,
+        currentSetIndex: Int? = nil,
+        sessionStateRaw: String? = nil,
+        currentExerciseLog: ExerciseSessionLog? = nil,
+        lastUpdated: Date = Date()
     ) {
         self.id = id
         self.date = date
@@ -185,6 +199,12 @@ public struct Session: Codable, Identifiable, Sendable {
         self.exerciseLogs = exerciseLogs
         self.stats = stats
         self.synced = synced
+        self.isActive = isActive
+        self.currentExerciseIndex = currentExerciseIndex
+        self.currentSetIndex = currentSetIndex
+        self.sessionStateRaw = sessionStateRaw
+        self.currentExerciseLog = currentExerciseLog
+        self.lastUpdated = lastUpdated
     }
 }
 

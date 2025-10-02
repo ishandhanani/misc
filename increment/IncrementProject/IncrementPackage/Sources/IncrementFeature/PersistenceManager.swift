@@ -106,6 +106,16 @@ class PersistenceManager {
         }
     }
 
+    func isSessionStale(_ session: Session, threshold: TimeInterval = 86400) -> Bool {
+        // Consider a session stale if it's more than threshold seconds old (default: 24 hours)
+        return Date().timeIntervalSince(session.lastUpdated) > threshold
+    }
+
+    func clearCurrentSession() {
+        userDefaults.removeObject(forKey: Keys.currentSession)
+        logger.debug("Cleared current session")
+    }
+
     // MARK: - Exercise States
 
     func saveExerciseStates(_ states: [UUID: ExerciseState]) {
